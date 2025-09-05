@@ -4,11 +4,9 @@ This repo will contains the code for our paper *"Eye Movement Classification via
 
 ## &#x1F527; Usage
 ### Dependencies
-- Python 3.8
-- PyTorch 1.7.0
-- cuda 11.0
-- torchvision 0.8.1
-- tensorboardX 2.14
+'''
+pip install -r requirements.txt
+'''
 
 ### Dataset
 - Download [Saliency4ASD](https://saliency4asd.ls2n.fr/datasets/) dataset.

@@ -46,7 +46,7 @@ import torchvision
 def get_args():
     parser = argparse.ArgumentParser('BEiT fine-tuning and evaluation script for image classification', add_help=False)
     parser.add_argument('--batch_size', default=32, type=int)
-    parser.add_argument('--epochs', default=60, type=int)
+    parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--update_freq', default=1, type=int)
     parser.add_argument('--save_ckpt_freq', default=5, type=int)
 
@@ -95,7 +95,7 @@ def get_args():
         weight decay. We use a cosine schedule for WD and using a larger decay by
         the end of training improves performance for ViTs.""")
 
-    parser.add_argument('--lr', type=float, default=5e-6, metavar='LR',
+    parser.add_argument('--lr', type=float, default=9e-6, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--layer_decay', type=float, default=0.85)
 
@@ -157,12 +157,16 @@ def get_args():
     parser.add_argument('--use_cls', action='store_false', dest='use_mean_pooling')
     parser.add_argument('--disable_weight_decay_on_rel_pos_bias', action='store_true', default=False)
 
+    # data_path = f'./dataset_task1_cross5/{group}'
+    # output_dir = f'./save_result_task1/{group}'
+    # log_dir = f'./save_result_task1/{group}'
+
     # Dataset parameters
-    parser.add_argument('--data_type', default='dataset_ASD', choices=['dataset_ASD', 'dataset_age', 'dataset_task'],
+    parser.add_argument('--data_type', default='dataset_age', choices=['dataset_ASD', 'dataset_age', 'dataset_task_1', 'dataset_task_2', 'dataset_gender'],
                         type=str, help='dataset type')
     #parser.add_argument('--data_path', default='./dataset_test', type=str,
       #                  help='dataset path')
-    parser.add_argument('--data_path', default='./dataset_G1+G2_cross5/group3', type=str,
+    parser.add_argument('--data_path', default='./dataset_age/group4', type=str,
                         help='dataset path')
     parser.add_argument('--eval_data_path', default=None, type=str,
                         help='dataset path for evaluation')
@@ -174,11 +178,11 @@ def get_args():
                         type=str, help='ImageNet dataset path')
     #parser.add_argument('--output_dir', default='./save_result_test',
         #            help='path where to save, empty for no saving')
-    parser.add_argument('--output_dir', default='./all_model_save_result_G1+G2_cross5_15/group3',
+    parser.add_argument('--output_dir', default='./save_result_age_new/group4',
                         help='path where to save, empty for no saving')
     #parser.add_argument('--log_dir', default='./logs_test',
      #                   help='path where to tensorboard log')
-    parser.add_argument('--log_dir', default='./all_model_save_result_G1+G2_cross5_15/group3',
+    parser.add_argument('--log_dir', default='./save_result_age_new/group4',
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -215,8 +219,7 @@ def get_args():
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
 
-    known_args, _ = parser.parse_known_args()  #当仅获取到基本设置时，如果运行命令中传入了之后才会获取到的其他配置，不会报错；而是将多出来的部分保存起来，留到后面使用。
-
+    known_args, _ = parser.parse_known_args()  
     if known_args.enable_deepspeed:
         try:
             import deepspeed
@@ -232,19 +235,18 @@ def get_args():
     return parser.parse_args(), ds_init
 
 def imshow(img, mean, std, filename=None):
-    # img是一个张量，我们需要将值转换到[0,1]区间以供matplotlib正确显示
-    img = img.numpy().transpose((1, 2, 0))  # 将通道从[CHW]变换到[HWC]
-    # 进行反标准化
-    img = std * img + mean  # 此处mean和std需要是原标准化时使用的值
-    img = np.clip(img, 0, 1)  # 将所有值剪辑到[0,1]区间，确保图像数据有效
+    img = img.numpy().transpose((1, 2, 0))  
+    img = std * img + mean  
+    img = np.clip(img, 0, 1)  
     plt.imshow(img)
-    if filename:  # 如果提供了文件名，就保存到文件
+    if filename:  
         plt.imsave(filename, img)
     plt.show()
 
 
+
 def main(args, ds_init):
-    utils.init_distributed_mode(args)    #分布式训练
+    utils.init_distributed_mode(args)
 
     if ds_init is not None:
         utils.create_ds_config(args)
@@ -275,7 +277,7 @@ def main(args, ds_init):
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
         print("Sampler_train = %s" % str(sampler_train))
-        if args.dist_eval:  #如果启用了分布式验证（dist_eval），则使用 DistributedSampler 对验证集进行采样，否则使用 SequentialSampler 顺序采样。分布式验证下，为了确保每个进程获取到相同数量的样本，可能会在验证集中添加一些重复的样本
+        if args.dist_eval: 
             if len(dataset_val) % num_tasks != 0:
                 print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
                       'This will slightly alter validation results as extra duplicate entries are added to achieve '
@@ -284,8 +286,7 @@ def main(args, ds_init):
                 dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
         else:
             sampler_val = torch.utils.data.RandomSampler(dataset_val)
-            # sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    else:  #如果不是分布式训练，则使用 RandomSampler 随机采样训练集，同时使用 SequentialSampler 顺序采样验证集。
+    else:  
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.RandomSampler(dataset_val)
         # sampler_val = torch.utils.data.SequentialSampler(dataset_val)
@@ -302,10 +303,10 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-    )  #使用 DataLoader 加载训练数据
+    )  
 
 
-    if dataset_val is not None:   #如果存在验证集，则使用 DataLoader 加载验证数据
+    if dataset_val is not None:   
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
             batch_size=int(1.5 * args.batch_size),
@@ -316,23 +317,10 @@ def main(args, ds_init):
     else:
         data_loader_val = None
 
-    # # 数据增强后的图像可视化
-    # dataiter = iter(data_loader_train)
-    # images, _, labels, _ = dataiter.next()
-
-
-    # mean = np.array([0.5000, 0.5000, 0.5000])
-    # std = np.array([0.5000, 0.5000, 0.5000])
-    
-    # # 显示图像
-    # imshow(torchvision.utils.make_grid(images), mean, std, filename='test/saved_image.png')
-
-    # # 打印标签
-    # print('Labels: ', ' '.join('%5s' % labels[j] for j in range(len(labels))))
 
 
 
-    mixup_fn = None   #数据增广方式 无数据增广 
+    mixup_fn = None  
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
         print("Mixup is activated!")
@@ -358,10 +346,10 @@ def main(args, ds_init):
 
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
-    args.window_size = (args.input_size // patch_size[0], args.input_size // patch_size[1]) #分成的每个patch的大小
+    args.window_size = (args.input_size // patch_size[0], args.input_size // patch_size[1]) 
     args.patch_size = patch_size
 
-    if args.finetune:   #加载预训练模型的检查点
+    if args.finetune:  
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.finetune, map_location='cpu', check_hash=True)
@@ -377,36 +365,35 @@ def main(args, ds_init):
                 break
         if checkpoint_model is None:
             checkpoint_model = checkpoint
-        state_dict = model.state_dict()  #获取当前模型的状态字典（state_dict()）
-        for k in ['head.weight', 'head.bias']:    #如果分类头的分类数不等于预训练模型的分类数 就去掉分类头
+        state_dict = model.state_dict()  
+        for k in ['head.weight', 'head.bias']:   
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint_model[k]
-        #相对位置偏置在注意力机制中用于引入元素之间的相对位置信息，以增强模型对序列或图像中元素之间关系的建模能力
         if model.use_rel_pos_bias and "rel_pos_bias.relative_position_bias_table" in checkpoint_model:
             print("Expand the shared relative position embedding to each transformer block. ")
             num_layers = model.get_num_layers()  #num_layers 12
             rel_pos_bias = checkpoint_model["rel_pos_bias.relative_position_bias_table"]
-            for i in range(num_layers):  #将共享的相对位置偏置 rel_pos_bias 克隆（clone）并赋值给每个 Transformer 块中的相对位置偏置表。
+            for i in range(num_layers):  
                 checkpoint_model["blocks.%d.attn.relative_position_bias_table" % i] = rel_pos_bias.clone()
 
-            checkpoint_model.pop("rel_pos_bias.relative_position_bias_table")  #移除原来位于根目录下的共享相对位置偏置表。这是因为已经将相对位置偏置复制到每个 Transformer 块中，不再需要在根目录下保留原始的共享表。
+            checkpoint_model.pop("rel_pos_bias.relative_position_bias_table") 
 
         all_keys = list(checkpoint_model.keys())
         for key in all_keys:
             if "relative_position_index" in key:
-                checkpoint_model.pop(key)  #移除与相对位置索引相关的键
+                checkpoint_model.pop(key)  
 
             if "relative_position_bias_table" in key:
                 rel_pos_bias = checkpoint_model[key]
                 src_num_pos, num_attn_heads = rel_pos_bias.size()  #(732,12)
                 dst_num_pos, _ = model.state_dict()[key].size()  #732
-                dst_patch_shape = model.patch_embed.patch_shape #目标模型的 patch 形状(14,14)
+                dst_patch_shape = model.patch_embed.patch_shape 
                 if dst_patch_shape[0] != dst_patch_shape[1]:
                     raise NotImplementedError()
-                num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)  #计算额外的令牌数，这些令牌不属于图像的原始 patch 区域3
-                src_size = int((src_num_pos - num_extra_tokens) ** 0.5)  #计算源模型中相对位置偏置表对应的图像大小。27
-                dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)  #计算源模型中相对位置偏置表对应的图像大小。27
+                num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1) 
+                src_size = int((src_num_pos - num_extra_tokens) ** 0.5)  
+                dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)  
                 if src_size != dst_size:
                     print("Position interpolate for %s from %dx%d to %dx%d" % (
                         key, src_size, src_size, dst_size, dst_size))
@@ -459,17 +446,14 @@ def main(args, ds_init):
                     new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
                     checkpoint_model[key] = new_rel_pos_bias
 
-        # interpolate position embedding
         if 'pos_embed' in checkpoint_model:
             pos_embed_checkpoint = checkpoint_model['pos_embed']
             embedding_size = pos_embed_checkpoint.shape[-1]
             num_patches = model.patch_embed.num_patches
             num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-            # height (== width) for the checkpoint position embedding
             orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
             # height (== width) for the new position embedding
             new_size = int(num_patches ** 0.5)
-            # class_token and dist_token are kept unchanged
             if orig_size != new_size:
                 print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
                 extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
@@ -481,7 +465,6 @@ def main(args, ds_init):
                 pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
                 new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
                 checkpoint_model['pos_embed'] = new_pos_embed
-        #在预训练模型中 是没有head层的 也没有归一化层  需要载入
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
         # model.load_state_dict(checkpoint_model, strict=False)
 
@@ -489,8 +472,6 @@ def main(args, ds_init):
 
     model_ema = None
 
-    #未使用
-    #在训练中启用指数移动平均模型，以提高模型的鲁棒性和泛化性能。
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
         model_ema = ModelEma(
@@ -500,7 +481,6 @@ def main(args, ds_init):
             resume='')
         print("Using EMA with decay = %.8f" % args.model_ema_decay)
 
-    #打印出模型和模型需要的参数 是VIT模型
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -516,7 +496,7 @@ def main(args, ds_init):
     print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
 
     num_layers = model_without_ddp.get_num_layers()
-    if args.layer_decay < 1.0:  #在模型训练中根据用户指定的权重衰减参数分配器，为每一层分配不同的权重衰减值。这样的操作有助于更细粒度地调整模型的正则化效果。
+    if args.layer_decay < 1.0:  
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
     else:
         assigner = None
@@ -524,12 +504,10 @@ def main(args, ds_init):
     if assigner is not None:
         print("Assigned values = %s" % str(assigner.values))
 
-    skip_weight_decay_list = model.no_weight_decay()  #创建一个不应用权重衰减的参数列表
-    #未使用
-    if args.disable_weight_decay_on_rel_pos_bias:  #是否启用了禁用相对位置偏置的选项
+    skip_weight_decay_list = model.no_weight_decay() 
+    if args.disable_weight_decay_on_rel_pos_bias: 
         for i in range(num_layers):
-            skip_weight_decay_list.add("blocks.%d.attn.relative_position_bias_table" % i)  #将相对位置偏置参数的名称添加到不应用权重衰减的列表中。这是为了确保相对位置偏置不受权重衰减的影响。
-    #未使用
+            skip_weight_decay_list.add("blocks.%d.attn.relative_position_bias_table" % i) 
     if args.enable_deepspeed:  
         loss_scaler = None
         optimizer_params = get_parameter_groups(
@@ -543,7 +521,6 @@ def main(args, ds_init):
         print("model.gradient_accumulation_steps() = %d" % model.gradient_accumulation_steps())
         assert model.gradient_accumulation_steps() == args.update_freq
     else:
-        #根据分布式训练的设置，创建相应的模型和优化器，并在需要的情况下应用分布式数据并行。
         if args.distributed:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model_without_ddp = model.module
@@ -552,21 +529,20 @@ def main(args, ds_init):
             args, model_without_ddp, skip_list=skip_weight_decay_list,
             get_num_layer=assigner.get_layer_id if assigner is not None else None, 
             get_layer_scale=assigner.get_scale if assigner is not None else None)
-        loss_scaler = NativeScaler()  #创建原生缩放器 (NativeScaler)，用于缩放损失值以进行混合精度训练。
+        loss_scaler = NativeScaler()  
 
-    print("Use step level LR scheduler!")  #使用步级学习率调度器
-    lr_schedule_values = utils.cosine_scheduler(   #通过余弦调度器生成学习率和权重衰减的变化列表，并打印它们的最大和最小值。余弦调度器常用于训练过程中学习率和权重衰减的动态调整
+    print("Use step level LR scheduler!")  
+    lr_schedule_values = utils.cosine_scheduler(   
         args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,
         warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
     )
-    if args.weight_decay_end is None:  #检查了是否设置了权重衰减的结束值，如果没有设置，则将其设置为与初始权重衰减相同的值。
+    if args.weight_decay_end is None: 
         args.weight_decay_end = args.weight_decay
-    wd_schedule_values = utils.cosine_scheduler(  #生成了权重衰减的变化列表
+    wd_schedule_values = utils.cosine_scheduler(  
         args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
-    if mixup_fn is not None:   #loss 采用的是标签平滑loss  这是一种标签用的是概率的方法 
-        # smoothing is handled with mixup label transform
+    if mixup_fn is not None:   
         criterion = SoftTargetCrossEntropy()
         criterion_mse = nn.MSELoss()
     elif args.smoothing > 0.:
@@ -579,11 +555,11 @@ def main(args, ds_init):
     print("criterion_cls = %s" % str(criterion_cls))
     print("criterion_mse = %s" % str(criterion_mse))
 
-    utils.auto_load_model(  #加载模型。进入函数 
+    utils.auto_load_model( 
         args=args, model=model, model_without_ddp=model_without_ddp,
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
-    if args.eval:  #测试验证集
+    if args.eval: 
         test_stats = evaluate(data_loader_val, model, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)

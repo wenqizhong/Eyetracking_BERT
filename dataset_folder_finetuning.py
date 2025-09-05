@@ -27,7 +27,7 @@ def has_file_allowed_extension(filename: str, extensions: Tuple[str, ...]) -> bo
     Returns:
         bool: True if the filename ends with one of given extensions
     """
-    return filename.lower().endswith(extensions) #这个函数的目的是检查给定文件是否具有允许的扩展名。例如，如果调用 has_file_allowed_extension("example.jpg", (".jpg", ".png"))，它将返回 True，因为文件名以 .jpg 结尾
+    return filename.lower().endswith(extensions) 
 
 
 def is_image_file(filename: str) -> bool:
@@ -45,7 +45,6 @@ def is_image_file(filename: str) -> bool:
 def check_column(file_path, target_string, img_size):
     try:
         with open(file_path, 'r') as file:
-            # 读取文件的每一行
             lines = file.readlines()
             x_column_values = []
             y_column_values = []
@@ -73,7 +72,7 @@ def check_column(file_path, target_string, img_size):
                 for index in indices:
                     x_value = x_column_values[index]
                     y_value = y_column_values[index]
-                    if 0 < x_value <= x_limited and 0 < y_value <= y_limited:   #下面scale_position_fixations先resize到256，再中心裁剪到224，坐标太大会超出范围
+                    if 0 < x_value <= x_limited and 0 < y_value <= y_limited:
                         position_pairs.append((x_value, y_value))
             else:
                 position_pairs = None
@@ -90,41 +89,31 @@ def  last_folder(path):
     return path[-1]
 
 def scale_position_fixations(position_fixations, orig_size, process_size, final_size):
-    # 初始化scaled_positions为空列表
     scaled_positions = []
     cropped_positions = []
-    # 计算缩放因子
+    # scaling
     if position_fixations is None or position_fixations is []:
-    # 如果position_fixations为空，则返回空列表或适当的默认值
         return None
     for (x, y) in position_fixations:
-        # 计算缩放因子
         x_scale = process_size[0] / orig_size[0]
         y_scale = process_size[1] / orig_size[1]
         
-        # 缩放注视点坐标
         scaled_positions = [(x * x_scale, y * y_scale) for (x, y) in position_fixations]
 
-        # 计算中心裁剪的偏移
         offset_x = 16
         offset_y = 16
         # offset_x = (process_size[0] - final_size[0]) / 2 if process_size[0] > final_size[0] else 0
         # offset_y = (process_size[1] - final_size[1]) / 2 if process_size[1] > final_size[1] else 0
-        
-        # 调整注视点坐标到裁剪后的图像
+
         cropped_positions = [
             (x - offset_x if x >= 16 else x, y - offset_y if y >= 16 else y)
             for (x, y) in scaled_positions
-        ]  #若x,y小于16则会出现负数，所以小于16时取本身
+        ] 
 
     return cropped_positions
 
 def get_patch_indices(position_fixations, img_size, patch_size):
-    # position_fixations是注视点坐标的列表，每个元素格式为(x, y)
-    # img_size是图像尺寸，例如(224, 224)
-    # patch_size是块的大小，例如16
     if position_fixations is None or position_fixations is []:
-# 如果position_fixations为空，则返回空列表或适当的默认值
         return None
     patch_indices = []
     for (x, y) in position_fixations:
@@ -172,7 +161,7 @@ def make_dataset(
                         sub_idx = int(txt_idx)
                         txt_path = os.path.join(txt_dir_path, txt)
                         path = os.path.join(root, fname)
-                        img = Image.open(path)  #添加图片为下面获取图片尺寸
+                        img = Image.open(path)  
                         fixations = check_column(txt_path, fname.split('.')[0], img.size)
                         position_fixations = fixations[1]
                         if position_fixations is not None:
@@ -227,7 +216,7 @@ class DatasetFolder(VisionDataset):
         targets (list): The class_index value for each image in the dataset
     """
 
-    def __init__(    #__init__()是类的构造方法
+    def __init__(    
             self,
             root: str,
             data_type: str,
@@ -238,7 +227,7 @@ class DatasetFolder(VisionDataset):
             is_valid_file: Optional[Callable[[str], bool]] = None,  
     ) -> None:
         super(DatasetFolder, self).__init__(root, transform=transform,
-                                            target_transform=target_transform)  #super调用父类的init方法， 同样可以使用super()去调用父类的其他方法
+                                            target_transform=target_transform)  
         # self.data_type = data_type
         classes, class_to_idx = self._find_classes(data_type)  
         samples = make_dataset(self.root, class_to_idx, extensions, is_valid_file) 
@@ -261,9 +250,7 @@ class DatasetFolder(VisionDataset):
 
      
  
-    # 函数来获取当前数据集的配置
     def _find_classes(self, data_type):
-        # 配置字典，为每个数据集定义类别和索引
         datasets_classes = {
             'dataset_ASD': {
                 'classes': ['TD', 'ASD'],
@@ -273,15 +260,18 @@ class DatasetFolder(VisionDataset):
                 'classes': ['18mos', '30mos'],
                 'class_to_idx': {'18mos': 0, '30mos': 1}
             },
-            'dataset_task1': {
-            'classes': ['FreeViewing', 'ObjectSearch'],
-            'class_to_idx': {'FreeViewing': 0, 'ObjectSearch': 1}
+            'dataset_task_1': {
+            'classes': ['free', 'object'],
+            'class_to_idx': {'free': 0, 'object': 1}
             },
-            'dataset_task2': {
-            'classes': ['FreeViewing', 'SaliencyViewing'],
-            'class_to_idx': {'FreeViewing': 0, 'SaliencyViewing': 1}
+            'dataset_task_2': {
+            'classes': ['free', 'saliency'],
+            'class_to_idx': {'free': 0, 'saliency': 1}
+            },
+            'dataset_gender': {
+            'classes': ['female', 'male'],
+            'class_to_idx': {'female': 0, 'male': 1},
             }
-            # 可以添加更多数据集的配置
         }
         config = datasets_classes.get(data_type)
         if config is not None:
@@ -314,7 +304,7 @@ class DatasetFolder(VisionDataset):
     #     class_to_idx = {'18mos': 0, '30mos': 1}
     #     return classes, class_to_idx
 
-    def __getitem__(self, index: int) -> Tuple[Any, Any, Any, Any]:  #getitem()是类的特殊方法，用于获取指定索引的值
+    def __getitem__(self, index: int) -> Tuple[Any, Any, Any, Any]:
         """
         Args:
             index (int): Index
@@ -416,6 +406,6 @@ class ImageFolder(DatasetFolder):
 
 
 # data_type = 'dataset_ASD',
-# dataset = ImageFolder('./dataset_age/group1/train', data_type = 'dataset_age', transform=None)
+# dataset = ImageFolder('./dataset_G1+G2_cross/group1/train', data_type = 'dataset_ASD', transform=None)
 
 

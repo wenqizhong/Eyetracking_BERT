@@ -27,22 +27,22 @@ from dataset_folder_pretraining import ImageFolder
 class DataAugmentationForBEiT(object):
     def __init__(self, args):
         imagenet_default_mean_and_std = args.imagenet_default_mean_and_std
-        mean = IMAGENET_INCEPTION_MEAN if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_MEAN  #mean = [0.485, 0.456, 0.406]
-        std = IMAGENET_INCEPTION_STD if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_STD  #std = [0.229, 0.224, 0.225]
+        mean = IMAGENET_INCEPTION_MEAN if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_MEAN
+        std = IMAGENET_INCEPTION_STD if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_STD
 
         self.common_transform = transforms.Compose([
-            transforms.ColorJitter(0.4, 0.4, 0.4),  #随机改变亮度、对比度和饱和度
-            transforms.RandomHorizontalFlip(p=0.5),  #随机水平翻转
-            RandomResizedCropAndInterpolationWithTwoPic(  #随机裁剪
-                size=args.input_size, second_size=args.second_input_size,  #size=224, second_size=112
+            transforms.ColorJitter(0.4, 0.4, 0.4),
+            transforms.RandomHorizontalFlip(p=0.5),
+            RandomResizedCropAndInterpolationWithTwoPic(
+                size=args.input_size, second_size=args.second_input_size,
                 interpolation=args.train_interpolation, second_interpolation=args.second_interpolation,
-            ),  #双三次插值；Lanczos插值
+            ),
         ])
 
-        self.patch_transform = transforms.Compose([ #对patch进行的变换
-            transforms.ToTensor(),  #将PIL Image或者 ndarray 转换为tensor，并且归一化至[0-1]
-            transforms.Normalize(  #给定均值：(R,G,B) 方差：（R，G，B），将会把Tensor正则化。
-                mean=torch.tensor(mean),  #mean=[0.485, 0.456, 0.406]
+        self.patch_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=torch.tensor(mean),
                 std=torch.tensor(std))
         ])
 
@@ -81,10 +81,9 @@ class DataAugmentationForBEiT(object):
 
 
 def build_beit_pretraining_dataset(args):
-    transform = DataAugmentationForBEiT(args)  #通过 DataAugmentationForBEiT 类创建一个数据增强的对象 transform
+    transform = DataAugmentationForBEiT(args)
     print("Data Aug = %s" % str(transform))
-    return ImageFolder(args.data_path, transform=transform) #返回一个 ImageFolder 对象，该对象代表了构建好的 BEiT 预训练数据集
-
+    return ImageFolder(args.data_path, transform=transform)
 
 
 def build_dataset(is_train, args):
@@ -110,7 +109,6 @@ def build_dataset(is_train, args):
         nb_classes = 1000
     elif args.data_set == "image_folder":
         root = os.path.join(args.data_path, 'train' if is_train else 'val')
-        # root = args.data_path if is_train else args.eval_data_path
         dataset = ImageFolder(root, transform=transform)
         nb_classes = args.nb_classes
         assert len(dataset.class_to_idx) == nb_classes
@@ -129,7 +127,6 @@ def build_transform(is_train, args):
     std = IMAGENET_INCEPTION_STD if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_STD
 
     if is_train:
-        # this should always dispatch to transforms_imagenet_train
         transform = create_transform(
             input_size=args.input_size,
             is_training=True,
@@ -143,8 +140,6 @@ def build_transform(is_train, args):
             std=std,
         )
         if not resize_im:
-            # replace RandomResizedCropAndInterpolation with
-            # RandomCrop
             transform.transforms[0] = transforms.RandomCrop(
                 args.input_size, padding=4)
         return transform
@@ -158,13 +153,10 @@ def build_transform(is_train, args):
                 args.crop_pct = 1.0
         size = int(args.input_size / args.crop_pct)
         t.append(
-            transforms.Resize(size, interpolation=3),  # to maintain same ratio w.r.t. 224 images
+            transforms.Resize(size, interpolation=3),
         )
         t.append(transforms.CenterCrop(args.input_size))
 
     t.append(transforms.ToTensor())
     t.append(transforms.Normalize(mean, std))
     return transforms.Compose(t)
-
-
-

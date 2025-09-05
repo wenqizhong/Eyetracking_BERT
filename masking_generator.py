@@ -1,11 +1,3 @@
-"""
-Originally inspired by impl at https://github.com/zhunzhong07/Random-Erasing, Apache 2.0
-Copyright Zhun Zhong & Liang Zheng
-
-Hacked together by / Copyright 2020 Ross Wightman
-
-Modified by Hangbo Bao, for generating the masked position for visual image transformer
-"""
 # --------------------------------------------------------
 # BEIT: BERT Pre-Training of Image Transformers (https://arxiv.org/abs/2106.08254)
 # Github source: https://github.com/microsoft/unilm/tree/master/beit
@@ -14,79 +6,324 @@ Modified by Hangbo Bao, for generating the masked position for visual image tran
 # By Hangbo Bao
 # Based on timm, DINO and DeiT code bases
 # https://github.com/rwightman/pytorch-image-models/tree/master/timm
-# Originally inspired by impl at https://github.com/zhunzhong07/Random-Erasing, Apache 2.0
-# Copyright Zhun Zhong & Liang Zheng
-#
-# Hacked together by / Copyright 2020 Ross Wightman
-#
-# Modified by Hangbo Bao, for generating the masked position for visual image transformer
+# https://github.com/facebookresearch/deit/
+# https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
-import random
 import math
+import sys
+from typing import Iterable, Optional
+import os
 import numpy as np
 
+import torch
 
-class MaskingGenerator:
-    def __init__(
-            self, input_size, num_masking_patches, min_num_patches=4, max_num_patches=None,
-            min_aspect=0.3, max_aspect=None):
-        if not isinstance(input_size, tuple):
-            input_size = (input_size, ) * 2  #图片被分为14*14 input_size:(14, 14)
-        self.height, self.width = input_size
+from timm.data import Mixup
+from timm.utils import accuracy, ModelEma
 
-        self.num_patches = self.height * self.width  #14*14=196
-        self.num_masking_patches = num_masking_patches #mask的数量75
+from sklearn.metrics import roc_auc_score, confusion_matrix, roc_curve, auc
+import torch.nn.functional as F
 
-        self.min_num_patches = min_num_patches #分成最小patches数量16
-        self.max_num_patches = num_masking_patches if max_num_patches is None else max_num_patches #分成的最大patches数量与mask数量相等75
+import utils
 
-        max_aspect = max_aspect or 1 / min_aspect
-        self.log_aspect_ratio = (math.log(min_aspect), math.log(max_aspect))  #存储了遮罩生成时所使用的纵横比例的对数值范围
 
-    def __repr__(self):
-        repr_str = "Generator(%d, %d -> [%d ~ %d], max = %d, %.3f ~ %.3f)" % (
-            self.height, self.width, self.min_num_patches, self.max_num_patches,
-            self.num_masking_patches, self.log_aspect_ratio[0], self.log_aspect_ratio[1])
-        return repr_str
+def train_class_batch(model, samples, patch_indices, target, criterion_cls, criterion_mse):
+    outputs = model(samples, patch_indices)
+    loss = criterion_cls(outputs, target)
+    return loss, outputs
 
-    def get_shape(self):
-        return self.height, self.width
 
-    def _mask(self, mask, max_mask_patches):
-        delta = 0
-        for attempt in range(10):
-            target_area = random.uniform(self.min_num_patches, max_mask_patches)
-            aspect_ratio = math.exp(random.uniform(*self.log_aspect_ratio))
-            h = int(round(math.sqrt(target_area * aspect_ratio)))
-            w = int(round(math.sqrt(target_area / aspect_ratio)))
-            if w < self.width and h < self.height:
-                top = random.randint(0, self.height - h)
-                left = random.randint(0, self.width - w)
+def get_loss_scale_for_deepspeed(model):
+    optimizer = model.optimizer
+    return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
 
-                num_masked = mask[top: top + h, left: left + w].sum()
-                # Overlap
-                if 0 < h * w - num_masked <= max_mask_patches:
-                    for i in range(top, top + h):
-                        for j in range(left, left + w):
-                            if mask[i, j] == 0:
-                                mask[i, j] = 1
-                                delta += 1
 
-                if delta > 0:
-                    break
-        return delta
+def calculate_metrics(output, target):
+    _, pred = torch.max(output, 1)
+    pred_np = pred.cpu().numpy()
+    target_np = target.cpu().numpy()
+    probabilities = F.softmax(output, dim=1)
+    pre = probabilities[:, 1].detach().cpu().numpy()
+    cm = confusion_matrix(target_np, pred_np).ravel()
 
-    def __call__(self):
-        mask = np.zeros(shape=self.get_shape(), dtype=int)
-        mask_count = 0
-        while mask_count < self.num_masking_patches:
-            max_mask_patches = self.num_masking_patches - mask_count
-            max_mask_patches = min(max_mask_patches, self.max_num_patches)
+    if len(cm) == 4:
+        tn, fp, fn, tp = cm
+    else:
+        tn = fp = fn = tp = 0
 
-            delta = self._mask(mask, max_mask_patches)
-            if delta == 0:
-                break
+    sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+
+    if len(np.unique(target_np)) == 1:
+        AUC = 0
+    else:
+        AUC = roc_auc_score(target_np, pre)
+
+    return AUC, sensitivity, specificity
+
+
+def train_one_epoch(model: torch.nn.Module, criterion_cls: torch.nn.Module, criterion_mse: torch.nn.Module,
+                    data_loader: Iterable, optimizer: torch.optim.Optimizer,
+                    device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
+                    model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
+                    start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
+                    num_training_steps_per_epoch=None, update_freq=None):
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    print_freq = 10
+
+    if loss_scaler is None:
+        model.zero_grad()
+        model.micro_steps = 0
+    else:
+        optimizer.zero_grad()
+
+    for data_iter_step, (samples, patch_indices, targets, sub_idx) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+        step = data_iter_step // update_freq
+        if step >= num_training_steps_per_epoch:
+            continue
+        it = start_steps + step
+        if lr_schedule_values is not None or wd_schedule_values is not None and data_iter_step % update_freq == 0:
+            for i, param_group in enumerate(optimizer.param_groups):
+                if lr_schedule_values is not None:
+                    param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                if wd_schedule_values is not None and param_group["weight_decay"] > 0:
+                    param_group["weight_decay"] = wd_schedule_values[it]
+
+        samples = samples.to(device, non_blocking=True)
+
+        indices = []
+        for indice in patch_indices:
+            indice = indice.to(device, non_blocking=True)
+            indices.append(indice)
+
+        targets = targets.to(device, non_blocking=True)
+
+        if mixup_fn is not None:
+            samples, indices, targets = mixup_fn(samples, indices, targets)
+
+        if loss_scaler is None:
+            samples = samples.half()
+            loss, output = train_class_batch(
+                model, samples, targets, criterion_cls, criterion_mse)
+        else:
+            with torch.cuda.amp.autocast():
+                loss, output = train_class_batch(
+                    model, samples, indices, targets, criterion_cls, criterion_mse)
+
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+            sys.exit(1)
+
+        if loss_scaler is None:
+            loss /= update_freq
+            model.backward(loss)
+            model.step()
+            if (data_iter_step + 1) % update_freq == 0:
+                if model_ema is not None:
+                    model_ema.update(model)
+            grad_norm = None
+            loss_scale_value = get_loss_scale_for_deepspeed(model)
+        else:
+            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+            loss /= update_freq
+            grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
+                                    parameters=model.parameters(), create_graph=is_second_order,
+                                    update_grad=(data_iter_step + 1) % update_freq == 0)
+            if (data_iter_step + 1) % update_freq == 0:
+                optimizer.zero_grad()
+                if model_ema is not None:
+                    model_ema.update(model)
+            loss_scale_value = loss_scaler.state_dict()["scale"]
+
+        torch.cuda.synchronize()
+
+        if mixup_fn is None:
+            _, preds = torch.max(output, dim=1)
+            class_acc = (preds == targets).float().mean()
+        else:
+            class_acc = None
+        metric_logger.update(loss=loss_value)
+        metric_logger.update(class_acc=class_acc)
+        metric_logger.update(loss_scale=loss_scale_value)
+        min_lr = 10.
+        max_lr = 0.
+        for group in optimizer.param_groups:
+            min_lr = min(min_lr, group["lr"])
+            max_lr = max(max_lr, group["lr"])
+
+        metric_logger.update(lr=max_lr)
+        metric_logger.update(min_lr=min_lr)
+        weight_decay_value = None
+        for group in optimizer.param_groups:
+            if group["weight_decay"] > 0:
+                weight_decay_value = group["weight_decay"]
+        metric_logger.update(weight_decay=weight_decay_value)
+        metric_logger.update(grad_norm=grad_norm)
+
+        if log_writer is not None:
+            log_writer.update(loss=loss_value, head="loss")
+            log_writer.update(class_acc=class_acc, head="loss")
+            log_writer.update(loss_scale=loss_scale_value, head="opt")
+            log_writer.update(lr=max_lr, head="opt")
+            log_writer.update(min_lr=min_lr, head="opt")
+            log_writer.update(weight_decay=weight_decay_value, head="opt")
+            log_writer.update(grad_norm=grad_norm, head="opt")
+            log_writer.set_step()
+
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+@torch.no_grad()
+def evaluate(data_loader, model, device, epoch, output_dir):
+    criterion = torch.nn.CrossEntropyLoss()
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Test:'
+    model.eval()
+        
+    if not os.path.exists(f'./{output_dir}/sub'):
+        os.makedirs(f'./{output_dir}/sub')
+    if not os.path.exists(f'./{output_dir}/scanpath'):
+        os.makedirs(f'./{output_dir}/scanpath')
+
+    sub_outputs = {}
+    sub_label = {}
+    for batch in metric_logger.log_every(data_loader, 10, header):
+        images = batch[0]
+        patch_indices = batch[1]
+        target = batch[2]
+        sub_idx = batch[-1]
+        images = images.to(device, non_blocking=True)
+        indices = []
+        for indice in patch_indices:
+            indice = indice.to(device, non_blocking=True)
+            indices.append(indice)
+        target = target.to(device, non_blocking=True)
+        sub_idx = sub_idx.to(device, non_blocking=True)
+
+        for subject, label in zip(sub_idx, target):
+            subject = subject.item()
+            label = label.item()
+            if subject not in sub_label:
+                sub_label[subject] = label
+        
+        with torch.cuda.amp.autocast():
+            output = model(images, indices)
+            loss = criterion(output, target)
+            
+        acc1 = accuracy(output, target, topk=(1,))
+        AUC1, sensitivity1, specificity1 = calculate_metrics(output, target)
+
+        AUC1 = torch.tensor(AUC1).to(device)
+        sensitivity1 = torch.tensor(sensitivity1).to(device)
+        specificity1 = torch.tensor(specificity1).to(device)
+
+        for idx, single_output, single_target in zip(sub_idx, output, target):
+            sub = idx.item()
+            output_list = single_output.tolist()
+            scanpath_lable = single_target.item()
+
+            scan_probabilities = F.softmax(single_output, dim=0)
+            scan_probabilities_list = scan_probabilities.tolist()
+
+            with open(f'{output_dir}/scanpath/{sub}_output.txt', 'a') as f:
+                f.write(f'{output_list}, label: {scanpath_lable}\n')
+            with open(f'{output_dir}/scanpath/{sub}_probabilities.txt', 'a') as f:
+                f.write(f'{scan_probabilities_list}, label: {scanpath_lable}\n')
+            with open(f'{output_dir}/scanpath/all_scanpath_output.txt', 'a') as f:
+                f.write(f'{output_list}, label: {scanpath_lable}\n')
+            with open(f'{output_dir}/scanpath/all_scanpath_probabilities.txt', 'a') as f:
+                f.write(f'{scan_probabilities_list}, label: {scanpath_lable}\n')
+
+            if sub not in sub_outputs:
+                sub_outputs[sub] = {
+                    'sum': scan_probabilities_list.copy(),
+                    'all_data': [scan_probabilities_list.copy()],
+                    'count': 1
+                }
             else:
-                mask_count += delta
+                sub_outputs[sub]['sum'] = [x + y for x, y in zip(sub_outputs[sub]['sum'], scan_probabilities_list)]
+                sub_outputs[sub]['count'] += 1
+                sub_outputs[sub]['all_data'].append(scan_probabilities_list.copy())
 
-        return mask
+            for sub in sub_outputs:
+                sub_outputs[sub]['average'] = [x / sub_outputs[sub]['count'] for x in sub_outputs[sub]['sum']]
+
+        batch_size = images.shape[0]
+        metric_logger.update(loss=loss.item())
+        acc1_value = acc1[0].item()
+        AUC1_value = AUC1.item()
+        sensitivity1_value = sensitivity1.item()
+        specificity1_value = specificity1.item()
+
+        metric_logger.meters['acc1'].update(acc1_value, n=batch_size)
+        metric_logger.meters['AUC1'].update(AUC1_value, n=batch_size)
+        metric_logger.meters['sensitivity1'].update(sensitivity1_value, n=batch_size)
+        metric_logger.meters['specificity1'].update(specificity1_value, n=batch_size)
+
+    metric_logger.synchronize_between_processes()
+
+    print('* Acc@1: {top1.global_avg:.3f}, loss: {losses.global_avg:.3f}\n\
+    AUC@1: {auc1.global_avg:.3f}, sensitivity@1: {sen1.global_avg:.3f}\n\
+    specificity@1: {spe1.global_avg:.3f}'
+        .format(top1=metric_logger.acc1, losses=metric_logger.loss,\
+                auc1=metric_logger.AUC1, sen1=metric_logger.sensitivity1,\
+                spe1=metric_logger.specificity1))
+    
+    for sub, _ in sub_outputs.items():
+        with open(f'{output_dir}/scanpath/{sub}_output.txt', 'a') as f:
+            f.write(f'epoch{epoch}\n')
+        with open(f'{output_dir}/scanpath/{sub}_probabilities.txt', 'a') as f:
+            f.write(f'epoch{epoch}\n')
+    with open(f'{output_dir}/scanpath/all_scanpath_output.txt', 'a') as f:
+        f.write(f'epoch{epoch}\n')
+    with open(f'{output_dir}/scanpath/all_scanpath_probabilities.txt', 'a') as f:
+        f.write(f'epoch{epoch}\n')
+
+    ave_sub_outputs_list = []
+    sub_labels_list = []
+    
+    for subject, output in sub_outputs.items():
+        if subject in sub_label:
+            ave_sub_outputs_list.append(output['average'])
+            sub_labels_list.append(sub_label[subject])
+
+    sub_logits = {subj: logits['average'] for subj, logits in sub_outputs.items()}
+    with open(f'{output_dir}/sub/sub_output_avg.txt', 'a') as f:
+        f.write(f'epoch{epoch}\n')
+        for subj in sub_outputs:
+            logits = sub_logits[subj]
+            label = sub_label[subj]
+            f.write(f'{subj}: {logits}, label: {label}\n')
+
+    outputs_tensor = torch.tensor(ave_sub_outputs_list)
+    labels_tensor = torch.tensor(sub_labels_list)
+    
+    AUC2, sensitivity2, specificity2 = calculate_metrics(outputs_tensor, labels_tensor)
+    
+    sub_pre = {sub: torch.tensor(probs['average']).argmax().item() for sub, probs in sub_outputs.items()}
+    correct = 0
+    total = len(sub_pre)
+    with open(f'{output_dir}/sub/sub_evaluation_results.txt', 'a') as file:
+        file.write(f'epoch{epoch}\n')
+        for key in sub_pre:
+            if key in sub_label:
+                if sub_pre[key] == sub_label[key]:
+                    correct += 1
+                    file.write(f"sub {key}: Correct\n")
+                else:
+                    file.write(f"sub {key}: Incorrect\n")
+            else:
+                total -= 1
+
+        acc2 = correct / total if total > 0 else 0
+        print(f"Accuracy for all subs: {acc2*100:.2f}%")
+        file.write(f"Accuracy for all subs: {acc2*100:.2f}%\n")
+        file.write(f"AUC: {AUC2}\nsensitivity: {sensitivity2}\nspecificity: {specificity2}\n")
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}

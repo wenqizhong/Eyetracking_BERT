@@ -31,10 +31,10 @@ import modeling_pretrain
 
 def get_args():
     parser = argparse.ArgumentParser('BEiT pre-training script', add_help=False)
-    parser.add_argument('--batch_size', default=128, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--epochs', default=800, type=int)
     parser.add_argument('--save_ckpt_freq', default=20, type=int)
-    parser.add_argument("--discrete_vae_weight_path", default='/home/pliu/code/copy_modify_beit/token/', type=str)
+    parser.add_argument("--discrete_vae_weight_path", default='token', type=str)
     parser.add_argument("--discrete_vae_type", type=str, default="dall-e")
     # Model parameters
     parser.add_argument('--model', default='beit_base_patch16_224_8k_vocab', type=str, metavar='MODEL',
@@ -96,15 +96,13 @@ def get_args():
                         help='Interpolation for discrete vae (random, bilinear, bicubic default: "lanczos")')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/home/pliu/code/copy_modify_beit/dataset_ASD', type=str,
+    parser.add_argument('--data_path', default='./dataset_G1+G2_cross/group1', type=str,
                         help='dataset path')
-    # parser.add_argument('--txt_path', default='/data/pliu/code/beit/dataset_ASD/train/image/ASD/1.txt', type=str,
-    #                     help='every subject img txt path')
     parser.add_argument('--imagenet_default_mean_and_std', default=True, action='store_true')
 
-    parser.add_argument('--output_dir', default='/home/pliu/code/copy_modify_beit/output_dir_test',
+    parser.add_argument('--output_dir', default='output_dir_test',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='/home/pliu/code/copy_modify_beit/logs_pre',
+    parser.add_argument('--log_dir', default='logs_pre',
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -167,7 +165,7 @@ def main(args):
 
     cudnn.benchmark = True
 
-    pretrained_path = '/home/pliu/code/copy_modify_beit/beit_base_patch16_224_pt22k.pth'  # 替换为您的预训练模型路径
+    pretrained_path = 'beit_base_patch16_224_pt22k.pth'  # 替换为您的预训练模型路径
     model = get_model(args, pretrained_path)
     # model = get_model(args)
     patch_size = model.patch_embed.patch_size

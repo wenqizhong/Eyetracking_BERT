@@ -27,7 +27,7 @@ def has_file_allowed_extension(filename: str, extensions: Tuple[str, ...]) -> bo
     Returns:
         bool: True if the filename ends with one of given extensions
     """
-    return filename.lower().endswith(extensions) #这个函数的目的是检查给定文件是否具有允许的扩展名。例如，如果调用 has_file_allowed_extension("example.jpg", (".jpg", ".png"))，它将返回 True，因为文件名以 .jpg 结尾
+    return filename.lower().endswith(extensions)
 
 
 def is_image_file(filename: str) -> bool:
@@ -45,7 +45,6 @@ def is_image_file(filename: str) -> bool:
 def check_column(file_path, target_string):
     try:
         with open(file_path, 'r') as file:
-            # 读取文件的每一行
             lines = file.readlines()
             x_column_values = []
             y_column_values = []
@@ -54,8 +53,8 @@ def check_column(file_path, target_string):
 
             for line in lines:
                 columns = line.strip().split()
-                x_column_values.append(float(columns[1]))  # Convert x to float
-                y_column_values.append(float(columns[2]))  # Convert y to float
+                x_column_values.append(float(columns[1]))
+                y_column_values.append(float(columns[2]))
                 img_column_values.append(columns[-1])
 
             img = ' '.join(img_column_values)
@@ -64,10 +63,7 @@ def check_column(file_path, target_string):
             occurrences = len(re.findall(pattern, img))
 
             if occurrences > 0:
-                # Find indices of occurrences
                 indices = [i for i, value in enumerate(img_column_values) if re.search(pattern, value)]
-                
-                # Output corresponding x and y values for each occurrence
                 for index in indices:
                     x_value = x_column_values[index]
                     y_value = y_column_values[index]
@@ -88,26 +84,18 @@ def  last_folder(path):
     return path[-1]
 
 def scale_position_fixations(position_fixations, orig_size, new_size):
-    # 初始化scaled_positions为空列表
     scaled_positions = []
-    # 计算缩放因子
     if position_fixations is None or position_fixations is []:
-    # 如果position_fixations为空，则返回空列表或适当的默认值
         return None
     for (x, y) in position_fixations:
         x_scale = new_size[0] / orig_size[0]
         y_scale = new_size[1] / orig_size[1]
         
-        # 缩放注视点坐标
         scaled_positions = [(x * x_scale, y * y_scale) for (x, y) in position_fixations]
     return scaled_positions
 
 def get_patch_indices(position_fixations, img_size, patch_size):
-    # position_fixations是注视点坐标的列表，每个元素格式为(x, y)
-    # img_size是图像尺寸，例如(224, 224)
-    # patch_size是块的大小，例如16
     if position_fixations is None or position_fixations is []:
-    # 如果position_fixations为空，则返回空列表或适当的默认值
         return None
     patch_indices = []
     for (x, y) in position_fixations:
@@ -136,7 +124,7 @@ def make_dataset(
         def is_valid_file(x: str) -> bool:
             return has_file_allowed_extension(x, cast(Tuple[str, ...], extensions))
     is_valid_file = cast(Callable[[str], bool], is_valid_file) 
-    for target_class in sorted(class_to_idx.keys()): #target_class: 'val', 'train'
+    for target_class in sorted(class_to_idx.keys()):
         class_index = class_to_idx[target_class]
         target_dir = os.path.join(directory, target_class)
         if not os.path.isdir(target_dir):
@@ -145,7 +133,7 @@ def make_dataset(
             if last_folder(root) == 'image':
                 print(root) 
                 txt_dir_path = os.path.join(os.path.dirname(root), 'data')
-                for fname in sorted(fnames):  #fname: 'ILSVRC2012_train_xxxx.JPEG', ...
+                for fname in sorted(fnames):
                     for txt in sorted(os.listdir(txt_dir_path)):
                         txt_path = os.path.join(txt_dir_path, txt)
                         fixations = check_column(txt_path, fname.split('.')[0])
@@ -195,7 +183,7 @@ class DatasetFolder(VisionDataset):
         targets (list): The class_index value for each image in the dataset
     """
 
-    def __init__(    #__init__()是类的构造方法
+    def __init__(
             self,
             root: str,
             loader: Callable[[str], Any],
@@ -205,10 +193,9 @@ class DatasetFolder(VisionDataset):
             is_valid_file: Optional[Callable[[str], bool]] = None,  
     ) -> None:
         super(DatasetFolder, self).__init__(root,  transform=transform,
-                                            target_transform=target_transform)  #super调用父类的init方法， 同样可以使用super()去调用父类的其他方法
+                                            target_transform=target_transform)  
         classes, class_to_idx = self._find_classes(self.root)  
         samples = make_dataset(self.root, class_to_idx, extensions, is_valid_file) 
-        # print(samples)
         if len(samples) == 0:
             msg = "Found 0 files in subfolders of: {}\n".format(self.root)
             if extensions is not None:
@@ -240,11 +227,11 @@ class DatasetFolder(VisionDataset):
             No class is a subdirectory of another.
         """
         classes = [d.name for d in os.scandir(dir) if d.is_dir()]
-        classes.sort()   #classes:['val', 'train']
-        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}  #class_to_idx:{'val': 0, 'train': 1}
+        classes.sort()
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
         return classes, class_to_idx
 
-    def __getitem__(self, index: int) -> Tuple[Any, Any, Any, Any]:  #getitem()是类的特殊方法，用于获取指定索引的值
+    def __getitem__(self, index: int) -> Tuple[Any, Any, Any, Any]:
         """
         Args:
             index (int): Index
@@ -277,19 +264,16 @@ IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tif
 
 
 def pil_loader(path: str) -> Image.Image:
-    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
         img = Image.open(f)
         return img.convert('RGB')
 
 
-# TODO: specify the return type
 def accimage_loader(path: str) -> Any:
     import accimage
     try:
         return accimage.Image(path)
     except IOError:
-        # Potentially a decoding problem, fall back to PIL.Image
         return pil_loader(path)
 
 
@@ -345,5 +329,3 @@ class ImageFolder(DatasetFolder):
 
 
 # dataset = ImageFolder('/home/pliu/code/modify_beit/dataset_ASD/train', transform=None)
-
-

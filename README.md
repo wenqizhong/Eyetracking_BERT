@@ -8,8 +8,39 @@ This repo will contains the code for our paper *"Eye Movement Classification via
 pip install -r requirements.txt
 '''
 
-### Dataset
-- Download [Saliency4ASD](https://saliency4asd.ls2n.fr/datasets/) dataset.
+This project utilizes two main eye-tracking datasets: the publicly available **Saliency4ASD** benchmark for comparative analysis and our proprietary **Collected ASD Eye-Tracking Dataset** for enhanced validation.
+
+### 1. Public Benchmark: Saliency4ASD
+
+The Saliency4ASD dataset is a widely used public resource for eye-tracking research in Autism Spectrum Disorder (ASD). It serves as the primary benchmark for model evaluation.
+
+* **Download:** Please obtain the dataset directly from the official source:
+    [Saliency4ASD Download Link](https://saliency4asd.ls2n.fr/datasets/)
+
+---
+
+### 2. Proprietary Dataset: Collected Eye-Tracking Data
+
+This dataset was collected internally to further validate our model's performance and generalization on a specific cohort.
+
+**Cohort and Collection Details:**
+
+We recruited **126 children aged 2-8 years** from hospitals and medical institutions in Shaanxi and Fujian provinces for eye movement data collection. The subjects included **62 children with ASD** (Autism Spectrum Disorder) and **64 TD (Typically Developing) children**.
+
+**Stimuli and Equipment:**
+
+* **Stimuli:** Based on the eye movement behavior characteristics of children with ASD, we selected **437 stimuli** across four types: **facial images, social scenes, natural scenes, and psychophysical images**.
+* **Eye Tracker:** We used a **SciEye 2.0 eye tracker**, recording data at a sampling rate of **$140 \text{ Hz}$**.
+* **Display:** The screen resolution was **$1920 \times 1080 \text{ pixels}$**, with the central image size set to **$1040 \times 780 \text{ pixels}$**.
+* **Procedure:** Participants were seated **$0.5 \text{ meters}$** from the monitor and instructed to **free-view** the images. Each image was displayed for **$2.5 \text{ seconds}$**, followed by a **$0.5 \text{-second}$** gray mask between consecutive images.
+
+**Download and License:**
+
+* **Download Link:** You can download our collected dataset from this [link](https://drive.google.com/file/d/1Vu42TTZYcUL01MYITh0vsiLTfeBPvW_W/view?usp=sharing).
+
+> **⚠️ License Restriction:**
+> This dataset is **only for academic use** and **cannot be used for commercial purposes**. Please refer to the accompanying license file (e.g., `LICENSE.txt`) for complete terms of use.
+
 
 ### Run
 - **Stage1** *Pre-traing Image-based BERT Model*

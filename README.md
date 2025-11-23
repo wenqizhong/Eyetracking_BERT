@@ -10,7 +10,9 @@ pip install -r requirements.txt
 
 This project utilizes two main eye-tracking datasets: the publicly available **Saliency4ASD** benchmark for comparative analysis and our proprietary **Collected ASD Eye-Tracking Dataset** for enhanced validation.
 
-### 1. Public Benchmark: Saliency4ASD
+
+### Dataset
+#### 1. Public Benchmark: Saliency4ASD
 
 The Saliency4ASD dataset is a widely used public resource for eye-tracking research in Autism Spectrum Disorder (ASD). It serves as the primary benchmark for model evaluation.
 
@@ -19,7 +21,7 @@ The Saliency4ASD dataset is a widely used public resource for eye-tracking resea
 
 ---
 
-### 2. Proprietary Dataset: Collected Eye-Tracking Data
+#### 2. Proprietary Dataset: Collected Eye-Tracking Data
 
 This dataset was collected internally to further validate our model's performance and generalization on a specific cohort.
 

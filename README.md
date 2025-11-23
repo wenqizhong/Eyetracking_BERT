@@ -8,10 +8,9 @@ This repo will contains the code for our paper *"Eye Movement Classification via
 pip install -r requirements.txt
 '''
 
+### Dataset
 This project utilizes two main eye-tracking datasets: the publicly available **Saliency4ASD** benchmark for comparative analysis and our proprietary **Collected ASD Eye-Tracking Dataset** for enhanced validation.
 
-
-### Dataset
 #### 1. Public Benchmark: Saliency4ASD
 
 The Saliency4ASD dataset is a widely used public resource for eye-tracking research in Autism Spectrum Disorder (ASD). It serves as the primary benchmark for model evaluation.
